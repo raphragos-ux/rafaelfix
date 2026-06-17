@@ -236,25 +236,25 @@ http {
     keepalive_requests 10000;
     client_max_body_size 0;
 
-   proxy_connect_timeout 300s;
+    proxy_connect_timeout 300s;
     proxy_send_timeout 3600s;
     proxy_read_timeout 3600s;
     proxy_buffering off;
     proxy_request_buffering off;
 
-   server_tokens off;
+    server_tokens off;
 
-   map \$http_upgrade \$connection_upgrade {
+    map \$http_upgrade \$connection_upgrade {
         default upgrade;
         ''      close;
     }
 
-   server {
+    server {
         listen 8080;
         server_name _;
 
-   # Main passthrough
-   location / {
+        # Main passthrough
+        location / {
             proxy_ssl_server_name on;
             proxy_ssl_protocols TLSv1.2 TLSv1.3;
             proxy_pass https://$DOMAIN;
@@ -266,8 +266,8 @@ http {
             proxy_set_header X-Forwarded-Proto \$scheme;
         }
 
-   # Trojan
-   location /trojan-rafael {
+        # Trojan
+        location /trojan-rafael {
             proxy_pass http://127.0.0.1:10001;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
@@ -276,8 +276,8 @@ http {
             proxy_read_timeout 3600s;
         }
 
-   # VLESS
-   location /vless-rafael {
+        # VLESS
+        location /vless-rafael {
             proxy_pass http://127.0.0.1:10002;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
@@ -287,8 +287,8 @@ http {
             proxy_read_timeout 3600s;
         }
 
-   # ✅ HTTPUpgrade - FULLY FIXED
-   location /httpupgrade-rafael {
+        # ✅ HTTPUpgrade - FULLY FIXED
+        location /httpupgrade-rafael {
             proxy_pass http://127.0.0.1:11004;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
