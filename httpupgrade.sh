@@ -1,9 +1,9 @@
 #!/bin/bash
 
-set +e
+set -euo pipefail
 
 # =========================================
-# SHELL DEPLOYER BY RAFAEL R. - FULLY FIXED
+# SHELL DEPLOYER - FINAL WORKING VERSION
 # =========================================
 
 # =========================
@@ -12,202 +12,113 @@ set +e
 GREEN='\033[1;32m'
 RED='\033[1;31m'
 YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
 CYAN='\033[1;36m'
-WHITE='\033[1;37m'
 NC='\033[0m'
 
 # =========================
 # VARIABLES
 # =========================
-PROJECT_ID="$(gcloud config get-value project 2>/dev/null)"
+PROJECT_ID="$(gcloud config get-value project 2>/dev/null || echo "")"
 REGION="us-central1"
 RAND=$(openssl rand -hex 3)
-CLOUD_RUN_SERVICE_NAME="rafael-$RAND"
+SERVICE_NAME="rafael-${RAND}"
 DOMAIN="www.google.com"
 BUILD_DIR=$(mktemp -d)
 
-# =========================
-# CLEANUP
-# =========================
-cleanup() {
-    rm -rf "$BUILD_DIR"
-}
-trap cleanup EXIT
-
-# =========================
-# HEADER
-# =========================
-clear
-echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}     SHELL DEPLOYER - ERROR FIXED${NC}"
-echo -e "${CYAN}=========================================${NC}"
-echo ""
+trap 'rm -rf "$BUILD_DIR"' EXIT
 
 # =========================
 # CHECK PROJECT
 # =========================
+clear
+echo -e "${CYAN}=========================================${NC}"
+echo -e "${GREEN}   DEPLOYER - FINAL FIX VERSION${NC}"
+echo -e "${CYAN}=========================================${NC}"
+
 if [ -z "$PROJECT_ID" ]; then
-    echo ""
-    echo -e "${RED}❌ ERROR: No Google Cloud project set.${NC}"
-    echo ""
-    echo "Run first:"
-    echo "gcloud config set project YOUR_PROJECT_ID"
-    echo ""
+    echo -e "${RED}❌ Walang naka-set na Google Cloud Project${NC}"
+    echo "Patakbuhin muna: gcloud config set project IYONG_PROJECT_ID"
     exit 1
 fi
 
-# =========================
-# ENABLE REQUIRED APIS
-# =========================
-echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}        ENABLING REQUIRED APIS${NC}"
-echo -e "${CYAN}=========================================${NC}"
+echo -e "${GREEN}✅ Project:${NC} $PROJECT_ID"
 echo ""
 
+# =========================
+# ENABLE APIS
+# =========================
+echo -e "${CYAN}➡️ Pinapagana ang mga kinakailangang serbisyo...${NC}"
 gcloud services enable \
-run.googleapis.com \
-cloudbuild.googleapis.com \
-artifactregistry.googleapis.com \
---quiet
+    run.googleapis.com \
+    cloudbuild.googleapis.com \
+    artifactregistry.googleapis.com \
+    --quiet
 
 # =========================
-# BILLING SETTINGS
+# SETTINGS
 # =========================
 echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}          BILLING SETTINGS${NC}"
-echo -e "${CYAN}=========================================${NC}"
-echo ""
+echo -e "${YELLOW}⚠️ Piliin ang Setting (Mas matatag ang Instance-Based):${NC}"
+echo "1) Request-Based"
+echo "2) Instance-Based ✅ REKOMENDADO"
+read -p "Piliin [1-2]: " BILL
 
-echo -e "${WHITE}1) REQUEST-BASED${NC}"
-echo "   ( Charged only when used, limited CPU )"
-echo ""
-echo -e "${WHITE}2) INSTANCE-BASED${NC} ✅ RECOMMENDED"
-echo "   ( Full CPU, stable connection, no throttling )"
-echo ""
+if [ "$BILL" = "2" ]; then
+    BILL_FLAGS="--no-cpu-throttling --cpu-boost"
+    MEM="2Gi"
+    CPU="1"
+else
+    BILL_FLAGS="--cpu-throttling"
+    MEM="1Gi"
+    CPU="1"
+fi
 
-while true; do
-    read -p "Select Billing Type [1-2]: " BILLING_CHOICE
-    case $BILLING_CHOICE in
-        1) BILLING_MODE="request"; BILLING_FLAGS="--cpu-throttling"; break ;;
-        2) BILLING_MODE="instance"; BILLING_FLAGS="--no-cpu-throttling --cpu-boost"; break ;;
-        *) echo -e "${RED}⚠️ Enter only 1 or 2${NC}"; echo "" ;;
-    esac
-done
-
-# =========================
-# RESOURCE SETTINGS
-# =========================
-echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}      CLOUD RUN RESOURCE SETTINGS${NC}"
-echo -e "${CYAN}=========================================${NC}"
-echo ""
-
-echo "MEMORY                vCPU"
-echo "1) 512Mi              1) 1vCPU"
-echo "2) 1Gi                2) 2vCPU"
-echo "3) 2Gi                3) 4vCPU ✅ RECOMMENDED"
-echo "4) 4Gi                4) 6vCPU"
-echo "5) 8Gi                5) 8vCPU"
-echo ""
-
-while true; do
-    read -p "Select Memory [1-5]: " MEMORY_CHOICE
-    case $MEMORY_CHOICE in
-        1) MEMORY="512Mi"; break ;;
-        2) MEMORY="1Gi"; break ;;
-        3) MEMORY="2Gi"; break ;;
-        4) MEMORY="4Gi"; break ;;
-        5) MEMORY="8Gi"; break ;;
-        *) echo -e "${RED}⚠️ Enter valid number${NC}"; echo "" ;;
-    esac
-done
-
-while true; do
-    read -p "Select vCPU [1-5]: " CPU_CHOICE
-    case $CPU_CHOICE in
-        1) CPU="1"; break ;;
-        2) CPU="2"; break ;;
-        3) CPU="4"; break ;;
-        4) CPU="6"; break ;;
-        5) CPU="8"; break ;;
-        *) echo -e "${RED}⚠️ Enter valid number${NC}"; echo "" ;;
-    esac
-done
-
-echo ""
-echo -e "${GREEN}✅ Selected:${NC} $MEMORY | $CPU | $BILLING_MODE"
-echo ""
-
-# =========================
-# FIXED VALUES
-# =========================
 CONCURRENCY="1000"
-TIMEOUT="3600" # 1 hour (max allowed)
+TIMEOUT="3600"
 MIN_INST="0"
 MAX_INST="2"
 
 # =========================
-# CREATE DIRECTORY
+# BUILD FILES
 # =========================
-mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR" || exit 1
 
-# =========================
-# ✅ FIXED CONFIG.JSON
-# =========================
+# ✅ CONFIG.JSON
 cat > config.json <<EOF
 {
   "log": { "loglevel": "warning" },
   "inbounds": [
     {
-      "tag": "trojan-ws",
+      "tag": "trojan",
       "port": 10001,
       "listen": "127.0.0.1",
       "protocol": "trojan",
       "settings": { "clients": [{"password": "rafaeltv"}] },
-      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": { "path": "/trojan-rafael?ed=2180", "headers": { "Host": "$DOMAIN" } }
+        "wsSettings": { "path": "/trojan-rafael?ed=2180" }
       }
     },
     {
-      "tag": "vless-ws",
+      "tag": "vless",
       "port": 10002,
       "listen": "127.0.0.1",
       "protocol": "vless",
-      "settings": {
-        "clients": [{"id": "15f7e8ea-7b56-45d4-93af-31f3c592fdf1", "level": 0}],
-        "decryption": "none"
-      },
-      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] },
+      "settings": { "clients": [{"id": "15f7e8ea-7b56-45d4-93af-31f3c592fdf1"}], "decryption": "none" },
       "streamSettings": {
         "network": "ws",
-        "wsSettings": { "path": "/vless-rafael?ed=2180", "headers": { "Host": "$DOMAIN" } }
+        "wsSettings": { "path": "/vless-rafael?ed=2180" }
       }
     },
     {
-      "tag": "ss-httpupgrade",
+      "tag": "httpupgrade",
       "port": 11004,
       "listen": "127.0.0.1",
-      "protocol": "shadowsocks",
-      "settings": {
-        "method": "chacha20-ietf-poly1305",
-        "password": "rafaeltv",
-        "network": "tcp,udp"
-      },
-      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] },
+      "protocol": "vless",
+      "settings": { "clients": [{"id": "15f7e8ea-7b56-45d4-93af-31f3c592fdf1"}], "decryption": "none" },
       "streamSettings": {
         "network": "httpupgrade",
-        "httpupgradeSettings": {
-          "path": "/httpupgrade-rafael?ed=2180",
-          "host": "$DOMAIN"
-        }
+        "httpupgradeSettings": { "path": "/httpupgrade-rafael?ed=2180", "host": "$DOMAIN" }
       }
     }
   ],
@@ -215,58 +126,28 @@ cat > config.json <<EOF
 }
 EOF
 
-# =========================
-# ✅ FIXED NGINX.CONF
-# =========================
+# ✅ NGINX.CONF
 cat > nginx.conf <<EOF
 worker_processes auto;
-worker_rlimit_nofile 65535;
-
-events {
-    worker_connections 65535;
-    multi_accept on;
-    use epoll;
-}
-
+events { worker_connections 1024; }
 http {
     sendfile on;
     tcp_nopush on;
     tcp_nodelay on;
     keepalive_timeout 300;
-    keepalive_requests 10000;
     client_max_body_size 0;
 
-    proxy_connect_timeout 300s;
-    proxy_send_timeout 3600s;
-    proxy_read_timeout 3600s;
-    proxy_buffering off;
-    proxy_request_buffering off;
-
-    server_tokens off;
-
-    map \$http_upgrade \$connection_upgrade {
-        default upgrade;
-        ''      close;
-    }
+    map \$http_upgrade \$connection_upgrade { default upgrade; '' close; }
 
     server {
         listen 8080;
-        server_name _;
 
-        # Main passthrough
         location / {
-            proxy_ssl_server_name on;
-            proxy_ssl_protocols TLSv1.2 TLSv1.3;
             proxy_pass https://$DOMAIN;
             proxy_set_header Host $DOMAIN;
-            proxy_set_header Referer https://www.google.com/;
-            proxy_set_header Origin https://www.cloudflare.com/;
-            proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
         }
 
-        # Trojan
         location /trojan-rafael {
             proxy_pass http://127.0.0.1:10001;
             proxy_http_version 1.1;
@@ -276,71 +157,52 @@ http {
             proxy_read_timeout 3600s;
         }
 
-        # VLESS
         location /vless-rafael {
             proxy_pass http://127.0.0.1:10002;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection \$connection_upgrade;
             proxy_set_header Host \$host;
-            proxy_buffering off;
             proxy_read_timeout 3600s;
         }
 
-        # ✅ HTTPUpgrade - FULLY FIXED
         location /httpupgrade-rafael {
             proxy_pass http://127.0.0.1:11004;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection \$connection_upgrade;
             proxy_set_header Host \$host;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-            proxy_cache off;
-            proxy_buffering off;
-            proxy_request_buffering off;
             proxy_read_timeout 3600s;
         }
     }
 }
 EOF
 
-# =========================
-# ✅ FIXED ENTRYPOINT
-# =========================
+# ✅ ENTRYPOINT
 cat > entrypoint.sh <<EOF
 #!/bin/sh
 set -e
-# Start Xray first
-/usr/local/bin/xray run -c /etc/xray/config.json &
-# Wait to ensure Xray is ready
-sleep 5
-# Start Nginx
+/usr/local/bin/xray run -c /etc/xray.json &
+sleep 4
 exec /usr/local/openresty/bin/openresty -g 'daemon off;'
 EOF
 chmod +x entrypoint.sh
 
-# =========================
-# ✅ UPDATED DOCKERFILE
-# =========================
+# ✅ DOCKERFILE
 cat > Dockerfile <<EOF
-FROM alpine:3.20 AS builder
-RUN apk add --no-cache curl unzip ca-certificates
-WORKDIR /app
-# Get latest stable Xray
-RUN curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
-    && unzip xray.zip \
-    && chmod +x xray \
-    && mv xray /usr/local/bin/xray \
-    && rm -rf xray.zip
+FROM alpine:3.20 AS xray
+RUN apk add --no-cache curl unzip
+WORKDIR /tmp
+RUN curl -sL -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
+    && unzip xray.zip xray && chmod +x xray && mv xray /usr/local/bin/
 
-FROM openresty/openresty:alpine-fat
-RUN apk add --no-cache ca-certificates tzdata
-COPY --from=builder /usr/local/bin/xray /usr/local/bin/xray
-RUN mkdir -p /etc/xray
-COPY config.json /etc/xray/config.json
+FROM openresty/openresty:alpine
+RUN apk add --no-cache ca-certificates
+COPY --from=xray /usr/local/bin/xray /usr/local/bin/xray
+COPY config.json /etc/xray.json
 COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /usr/local/bin/xray /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 EXPOSE 8080
 CMD ["/entrypoint.sh"]
 EOF
@@ -349,81 +211,62 @@ EOF
 # BUILD & DEPLOY
 # =========================
 echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}          BUILDING IMAGE${NC}"
-echo -e "${CYAN}=========================================${NC}"
-echo ""
-
-gcloud builds submit \
-  --tag gcr.io/$PROJECT_ID/$CLOUD_RUN_SERVICE_NAME \
-  --machine-type=e2-medium \
-  . --quiet
+echo -e "${CYAN}➡️ Gumagawa ng imahe...${NC}"
+gcloud builds submit --tag=gcr.io/$PROJECT_ID/$SERVICE_NAME --quiet
 
 echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}         DEPLOYING TO CLOUD RUN${NC}"
-echo -e "${CYAN}=========================================${NC}"
-echo ""
-
-gcloud run deploy $CLOUD_RUN_SERVICE_NAME \
-  --image gcr.io/$PROJECT_ID/$CLOUD_RUN_SERVICE_NAME \
-  --platform managed \
-  --region $REGION \
-  --allow-unauthenticated \
-  --port 8080 \
-  --memory $MEMORY \
-  --cpu $CPU \
-  --concurrency $CONCURRENCY \
-  --timeout $TIMEOUT \
-  --min-instances $MIN_INST \
-  --max-instances $MAX_INST \
-  --execution-environment gen2 \
-  $BILLING_FLAGS \
-  --quiet
+echo -e "${CYAN}➡️ Nagde-deploy sa Cloud Run...${NC}"
+gcloud run deploy $SERVICE_NAME \
+    --image gcr.io/$PROJECT_ID/$SERVICE_NAME \
+    --platform managed \
+    --region $REGION \
+    --allow-unauthenticated \
+    --port 8080 \
+    --memory $MEM \
+    --cpu $CPU \
+    --concurrency $CONCURRENCY \
+    --timeout $TIMEOUT \
+    --min-instances $MIN_INST \
+    --max-instances $MAX_INST \
+    --execution-environment gen2 \
+    $BILL_FLAGS \
+    --quiet
 
 # =========================
-# GET RESULTS
+# RESULT
 # =========================
-CLOUD_RUN_URL=$(gcloud run services describe $CLOUD_RUN_SERVICE_NAME \
-  --region=$REGION --format='value(status.url)' 2>/dev/null || echo "ERROR_GETTING_URL")
+SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --format='value(status.url)' 2>/dev/null || echo "MALI ANG PAGKUHA NG URL")
 
-# =========================
-# OUTPUT
-# =========================
 echo ""
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}✅ DEPLOYMENT SUCCESSFUL${NC}"
-echo -e "${CYAN}=========================================${NC}"
+echo -e "${GREEN}=========================================${NC}"
+echo -e "${GREEN}✅ MATAGUMPAY NA NA-DEPLOY!${NC}"
+echo -e "${GREEN}=========================================${NC}"
+echo -e "URL: ${CYAN}$SERVICE_URL${NC}"
 echo ""
 
-echo -e "${GREEN}SERVICE NAME:${NC} $CLOUD_RUN_SERVICE_NAME"
-echo -e "${GREEN}DOMAIN:${NC} $CLOUD_RUN_URL"
-echo ""
-
-echo -e "${CYAN}--- TROJAN WS ---${NC}"
-echo "Password: rafaeltv"
+echo -e "${YELLOW}--- TROJAN WS ---${NC}"
+echo "Address: $SERVICE_URL"
 echo "Port: 443"
 echo "Path: /trojan-rafael?ed=2180"
+echo "Password: rafaeltv"
 echo "TLS: ON"
 echo ""
 
-echo -e "${CYAN}--- VLESS WS ---${NC}"
-echo "UUID: 15f7e8ea-7b56-45d4-93af-31f3c592fdf1"
-echo "Encryption: none"
+echo -e "${YELLOW}--- VLESS WS ---${NC}"
+echo "Address: $SERVICE_URL"
 echo "Port: 443"
 echo "Path: /vless-rafael?ed=2180"
+echo "UUID: 15f7e8ea-7b56-45d4-93af-31f3c592fdf1"
+echo "Encryption: none"
 echo "TLS: ON"
 echo ""
 
-echo -e "${CYAN}--- SHADOWSOCKS HTTPUPGRADE ✅ FIXED ---${NC}"
-echo "Password: rafaeltv"
-echo "Method: chacha20-ietf-poly1305"
-echo "Network: HTTPUpgrade"
+echo -e "${YELLOW}--- HTTPUPGRADE ✅ ---${NC}"
+echo "Address: $SERVICE_URL"
 echo "Port: 443"
 echo "Path: /httpupgrade-rafael?ed=2180"
+echo "Network: HTTPUpgrade"
+echo "UUID: 15f7e8ea-7b56-45d4-93af-31f3c592fdf1"
+echo "Encryption: none"
 echo "TLS: ON"
 echo ""
-
-echo -e "${CYAN}=========================================${NC}"
-echo -e "${GREEN}DONE!${NC}"
-echo -e "${CYAN}=========================================${NC}"
